@@ -56,6 +56,14 @@ function Deployer(service_account, service_sync_origin) {
     this.statefulset_watcher.on('updated', this.statefulsets_updated.bind(this));
     this.config_watcher = kubernetes.watch_resource('configmaps', 'skupper-services');
     this.config_watcher.on('updated', this.definitions_updated.bind(this));
+
+    // service_prefixes will store the data in skupper-prefixes
+    // configmap i.e. a map from origin to the prefix for the services
+    // of the origin connection
+    this.service_prefixes = {};
+    this.prefix_config_watcher = kubernetes.watch_resource('configmaps', 'skupper-prefixes');
+    this.prefix_config_watcher.on('updated', this.prefixes_updated.bind(this));
+
     if (service_sync_origin) {
         this.service_sync = service_sync(service_sync_origin);
     }
@@ -140,7 +148,12 @@ Deployer.prototype.definitions_updated = function (config) {
         var definitions = {};
         for (var name in config[0].data) {
             try {
-                definitions[name] = JSON.parse(config[0].data[name]);
+		var data = JSON.parse(config[0].data[name]);
+                var prefix = '';
+                if (this.service_prefixes[data.origin]) {
+                    prefix = this.service_prefixes[data.origin];
+                }
+                definitions[prefix + name] = data;
             } catch (e) {
                 log.error('Could not parse service definition for %s as JSON: e', name, e);
             }
@@ -165,6 +178,13 @@ Deployer.prototype.definitions_updated = function (config) {
         if (this.enlist) {
             this.enlist.definitions_updated({});
         }
+    }
+};
+
+Deployer.prototype.prefixes_updated = function (config) {
+    if (config && config.length == 1) {
+	log.info("Prefix configmap updated: %s", JSON.stringify(config[0].data));
+        this.service_prefixes = config[0].data;
     }
 };
 
